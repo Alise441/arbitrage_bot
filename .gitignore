@@ -115,11 +115,9 @@ nbgrader.log # For nbgrader, a Jupyter-based auto-grading tool
 *.sublime-project
 *.sublime-workspace
 
-#نوٹ پيڈ ++ (Notepad++)
 # sementara berkas Notepad++ (Notepad++ temporary files)
 *.*.bak
 
-# 운영체제 생성 파일 (OS generated files)
 # macOS
 .DS_Store
 .AppleDouble
