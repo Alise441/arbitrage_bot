@@ -292,8 +292,8 @@ if __name__ == '__main__':
     usdc_weth_pool_005_address = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
 
 
-    # Example: Selling 1000 USDC for WETH
-    amount_to_sell_usdc = Decimal(1000)
+    # Example: Selling 100 USDC for WETH
+    amount_to_sell_usdc = Decimal(100)
     print(f"\nFetching quote to sell {amount_to_sell_usdc} USDC for WETH...")
     amount_out, new_price, actual_price, gas_fee = uniswap_sell_quote(
             w3=web3_instance,
