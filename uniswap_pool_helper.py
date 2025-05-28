@@ -49,20 +49,20 @@ class UniswapPoolHelper:
         adjusted_price = price_raw_t1_per_t0 * (Decimal(10) ** (decimals_t0 - decimals_t1))
         return adjusted_price
 
-    def get_current_price(self, price_of_token0_in_token1: bool = True) -> Decimal:
+    def get_current_price(self, reverse_price: bool = False) -> Decimal:
         """
         Gets the current spot price from the pool.
 
         Args:
-            price_of_token0_in_token1 (bool): 
-                If True (default), returns price of token0 in terms of token1 (token1/token0).
-                If False, returns price of token1 in terms of token0 (token0/token1).
+            reverse_price (bool): 
+                If False (default), returns price of token0 in terms of token1 (token1/token0).
+                If True, returns price of token1 in terms of token0 (token0/token1).
         
         Returns:
             Decimal: The current readable price.
         """
         slot0 = self.pool_contract.functions.slot0().call()
-        sqrt_price_x96 = Decimal(slot0[0])
+        sqrt_price_x96 = Decimal(str(slot0[0]))
         
         # Calculate price of token1 in terms of token0
         price_t1_per_t0 = UniswapPoolHelper._calculate_price_from_sqrtprice(
@@ -71,7 +71,7 @@ class UniswapPoolHelper:
             self.decimals_token1
         )
         
-        if price_of_token0_in_token1: # return price token1/token0
+        if not reverse_price: # return price token1/token0
             return price_t1_per_t0
         else: # return price token0/token1
             if price_t1_per_t0 == Decimal(0):
@@ -121,9 +121,9 @@ class UniswapPoolHelper:
         }
         quote_result = self.quoter_contract.functions.quoteExactInputSingle(quote_params).call()
 
-        amount_out_base_units = Decimal(quote_result[0])
-        sqrt_price_x96_after_swap = Decimal(quote_result[1])
-        gas_estimate = Decimal(quote_result[3])
+        amount_out_base_units = Decimal(str(quote_result[0]))
+        sqrt_price_x96_after_swap = Decimal(str(quote_result[1]))
+        gas_estimate = Decimal(str(quote_result[3]))
 
         # Convert amount_out from base units to human-readable format
         amount_out = amount_out_base_units / (Decimal(10) ** decimals_out)
@@ -150,7 +150,7 @@ class UniswapPoolHelper:
         else: # amount_in is 0, so amount_out_readable will be 0
              actual_price_tOut_per_tIn = Decimal(0)
         
-        current_gas_price_wei = Decimal(self.w3.eth.gas_price)
+        current_gas_price_wei = Decimal(str(self.w3.eth.gas_price))
         gas_fee_eth = gas_estimate * current_gas_price_wei / (Decimal(10)**18)
 
         return amount_out, new_price_tOut_per_tIn, actual_price_tOut_per_tIn, gas_fee_eth
@@ -198,9 +198,9 @@ class UniswapPoolHelper:
         }
         quote_result = self.quoter_contract.functions.quoteExactOutputSingle(quote_params).call()
 
-        amount_in_base_units = Decimal(quote_result[0])
-        sqrt_price_x96_after_swap = Decimal(quote_result[1])
-        gas_estimate = Decimal(quote_result[3])
+        amount_in_base_units = Decimal(str(quote_result[0]))
+        sqrt_price_x96_after_swap = Decimal(str(quote_result[1]))
+        gas_estimate = Decimal(str(quote_result[3]))
 
         amount_in = amount_in_base_units / (Decimal(10) ** decimals_in)
 
@@ -226,7 +226,7 @@ class UniswapPoolHelper:
         else: # amount_out is 0, so amount_in will be 0
             actual_price_tIn_per_tOut = Decimal(0)
 
-        current_gas_price_wei = Decimal(self.w3.eth.gas_price)
+        current_gas_price_wei = Decimal(str(self.w3.eth.gas_price))
         gas_fee_eth = gas_estimate * current_gas_price_wei / (Decimal(10)**18)
         
         return amount_in, new_price_tIn_per_tOut, actual_price_tIn_per_tOut, gas_fee_eth

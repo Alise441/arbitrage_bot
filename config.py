@@ -8,6 +8,9 @@ load_dotenv()
 
 # Global variables
 PROFIT_THRESHOLD = 0.001  # Minimum profit threshold for arbitrage (0.1%)
+BINANCE_FEE = 0.00017250  # Binance taking fee (0.01725% per trade)
+
+# Ethereum RPC URL for connecting to the Ethereum network
 ETHEREUM_RPC_URL = os.environ.get("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com")  # Default RPC URL if not set
 
 # Address of the Uniswap V3 Quoter V2 contract
