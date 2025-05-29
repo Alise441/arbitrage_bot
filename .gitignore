@@ -137,3 +137,10 @@ $RECYCLE.BIN/
 *.bak
 *~
 *.swp # Vim swap files
+
+# testing files
+test*
+
+# profiling files
+*.prof
+profile*
