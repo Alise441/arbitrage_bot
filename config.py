@@ -1,44 +1,57 @@
 from pathlib import Path
 import json
 import os
+import logging
 from dotenv import load_dotenv
+from types import SimpleNamespace
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Global variables
-PROFIT_THRESHOLD = 0.001  # Minimum profit threshold for arbitrage (0.1%)
-BINANCE_FEE = 0.00017250  # Binance taking fee (0.01725% per trade)
+logger = logging.getLogger(__name__)
 
-# Ethereum RPC URL for connecting to the Ethereum network
-ETHEREUM_RPC_URL = os.environ.get("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com")  # Default RPC URL if not set
+# ======== Configuration Constants ========
+config = SimpleNamespace(
+    PROFIT_THRESHOLD=float(os.getenv("PROFIT_THRESHOLD", "0.0001")),       # 0.01%
+    BINANCE_FEE=float(os.getenv("BINANCE_FEE", "0.00017250")),            # 0.01725%
+    ETHEREUM_RPC_URL=os.getenv("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com"),
+    UNISWAP_SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
+    QUOTER_ADDRESS="0x61fFE014bA17989E743c5F6cB21bF9697530B21e"
+)
 
-# Address of the Uniswap V3 Quoter V2 contract
-QUOTER_ADDRESS = "0x61fFE014bA17989E743c5F6cB21bF9697530B21e"
-
-# Directory containing ABI files
-ABI_DIR = Path("abi") # Assumes 'abi' folder is in the same dir or accessible
-
-# Paths to ABI files
-QUOTER_ABI_PATH = ABI_DIR / "UniswapV3QuoterV2.json"
-POOL_ABI_PATH = ABI_DIR / "UniswapV3Pool.json"
-ERC20_ABI_PATH = ABI_DIR / "Erc20.json"
-
-# Load ABIs from JSON files
-try:
-    with open(QUOTER_ABI_PATH, 'r') as f:
-        QUOTER_ABI = json.load(f)
-    with open(POOL_ABI_PATH, 'r') as f:
-        POOL_ABI = json.load(f)
-    with open(ERC20_ABI_PATH, 'r') as f:
-        ERC20_ABI = json.load(f)
-except FileNotFoundError as e:
-    print(
-        f"Critical Error: ABI file not found. "
-        f"Please ensure '{QUOTER_ABI_PATH}', '{POOL_ABI_PATH}', and '{ERC20_ABI_PATH}' exist. "
-        f"Original error: {e}"
+# ======== Validate THEGRAPH_API_KEY ========
+THEGRAPH_API_KEY = os.getenv("THEGRAPH_API_KEY")
+if not THEGRAPH_API_KEY:
+    logger.critical(
+        "Critical Error: THEGRAPH_API_KEY environment variable is not set. "
+        "Visit https://thegraph.com/studio to obtain an API key."
     )
-    raise
-except json.JSONDecodeError as e:
-    print(f"Critical Error: Failed to decode ABI JSON from file. Error: {e}")
-    raise
+    raise EnvironmentError("Missing THEGRAPH_API_KEY")
+
+config.THEGRAPH_ENDPOINT = (
+    f"https://gateway.thegraph.com/api/{THEGRAPH_API_KEY}/subgraphs/id/{config.UNISWAP_SUBGRAPH_ID}"
+)
+
+# ======== ABI Paths ========
+ABI_DIR = Path("abi")  # Directory with ABI files
+
+ABI_PATHS = {
+    "QUOTER": ABI_DIR / "UniswapV3QuoterV2.json",
+    "POOL": ABI_DIR / "UniswapV3Pool.json",
+    "ERC20": ABI_DIR / "Erc20.json",
+}
+
+# ======== Load ABI Function ========
+def load_abis():
+    abis = {}
+    for name, path in ABI_PATHS.items():
+        try:
+            with open(path, "r") as f:
+                abis[name] = json.load(f)
+        except FileNotFoundError:
+            logger.critical(f"Critical Error: ABI file not found at {path}")
+            raise
+        except json.JSONDecodeError as e:
+            logger.critical(f"Critical Error: Failed to parse JSON in {path}. Error: {e}")
+            raise
+    return abis

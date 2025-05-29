@@ -23,7 +23,7 @@ if __name__ == '__main__':
     # Get current price of USDC in terms of WETH
     current_price = pool.get_current_price()
     # Get current price of WETH in terms of USDC
-    current_price_inverted = pool.get_current_price(price_of_token0_in_token1=False)
+    current_price_inverted = pool.get_current_price(reverse_price=True)
     print(f"Current Price: 1 USDC = {current_price:.8f} WETH")
     print(f"Current Price: 1 WETH = {current_price_inverted:.8f} USDC")
 
