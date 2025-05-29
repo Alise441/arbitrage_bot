@@ -1,10 +1,13 @@
 
-import config
+from config import config, load_abis
 from web3 import Web3
 from decimal import Decimal, getcontext
 
 # Импортируем наш класс
 from uniswap_pool_helper import UniswapPoolHelper
+
+# Загрузка ABI
+abis = load_abis()
 
 if __name__ == '__main__':
     getcontext().prec = 60  # Set decimal precision for calculations
@@ -16,7 +19,7 @@ if __name__ == '__main__':
     print("Connected to Ethereum RPC.")
 
     pool_address = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"  # Example Uniswap V3 pool address
-    pool = UniswapPoolHelper(w3, pool_address)
+    pool = UniswapPoolHelper(w3, pool_address, abis)
     usdc_address = pool.token0_address_cs  # USDC address in this pool
     weth_address = pool.token1_address_cs  # WETH address in this pool
 
