@@ -1,5 +1,4 @@
 import logging
-import sys
 import os 
 import requests
 import time
@@ -7,6 +6,8 @@ import ccxt
 import pandas as pd
 from web3 import Web3
 from decimal import Decimal, getcontext
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 from config import config, load_abis
 from uniswap_pool_helper import UniswapPoolHelper
 
@@ -23,7 +24,7 @@ logging.basicConfig(
 # ---- Telegram Notification ----
 def send_telegram_message(message: str):
     if not config.TELEGRAM_TOKEN or not config.TELEGRAM_CHAT_ID:
-        logging.debug("Telegram token or chat ID not set. Skipping Telegram notification.")
+        logging.warning("Telegram token or chat ID not set. Skipping Telegram notification.")
         return
 
     url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage"
@@ -42,12 +43,31 @@ def send_telegram_message(message: str):
 CSV_INPUT = "arbitrage_pairs.csv"
 CSV_OUTPUT = "arbitrage_results.csv"
 
-TRADE_VALUE_USD = Decimal(1000)
+TRADE_AMOUNT_USD = Decimal(1000)
 STABLECOINS_USD = ['USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'USDP', 'FDUSD', 'USDD']
 
 getcontext().prec = 30 # Set decimal precision for calculations
 
 # ---- Helper Functions ----
+def get_binance_mid_price(exchange, pair):
+    try:
+        ticker = exchange.fetch_ticker(pair)
+        if ticker and ticker.get('ask') and ticker.get('bid'):
+            return Decimal(str(ticker['ask'] + ticker['bid'])) / Decimal(2)
+        else:
+            logging.warning(f"Missing 'ask' or 'bid' price. Binance mid price cannot be calculated. Returning 0.")
+            return Decimal(0)
+    except Exception as e:
+        logging.warning(f"Cannot fetch Binance mid price: {e}. Returning 0.")
+        return Decimal(0)
+    
+def get_uniswap_mid_price(pool, reverse_price):
+    try:
+        return pool.get_current_price(reverse_price)
+    except Exception as e:
+        logging.warning(f"Cannot fetch Uniswap mid price: {e}. Returning 0.")
+        return Decimal(0)
+
 def get_eth_price_in_currency(exchange, currency_symbol="USDT"):
     try:
         if currency_symbol.upper() in ["ETH", "WETH"]:
@@ -81,22 +101,22 @@ def get_eth_price_in_currency(exchange, currency_symbol="USDT"):
 
 
 def get_base_price_in_stablecoin(exchange, base_symbol, quote_symbol, binance_mid_price):
-    if quote_symbol in STABLECOINS_USD: return binance_mid_price, quote_symbol
+    if quote_symbol in STABLECOINS_USD and binance_mid_price > 0: return binance_mid_price, quote_symbol
     elif base_symbol in STABLECOINS_USD: return Decimal(1), base_symbol
     else:
         base_stablecoin_price = Decimal(0)
         stablecoin_symbol = None
         for stablecoin_symbol in STABLECOINS_USD:
             # Try to get the price of base currency in terms of stablecoin
-            base_stablecoin_pair = f"{base_symbol}/{stablecoin_symbol}"
-            if base_stablecoin_pair in exchange.markets:
+            pair = f"{base_symbol}/{stablecoin_symbol}"
+            if pair in exchange.markets:
                 try:
-                    base_stablecoin_ticker = exchange.fetch_ticker(base_stablecoin_pair)   
-                    if base_stablecoin_ticker and base_stablecoin_ticker.get('last'):
-                        base_stablecoin_price = Decimal(str(base_stablecoin_ticker['last']))
+                    ticker = exchange.fetch_ticker(pair)   
+                    if ticker and ticker.get('last'):
+                        base_stablecoin_price = Decimal(str(ticker['last']))
                         break          
                 except Exception as e:
-                    logging.warning(f"Error fetching ticker for {base_stablecoin_pair}: {e}. Skipping this stablecoin.")
+                    logging.warning(f"Error fetching ticker for {pair}: {e}. Skipping this stablecoin.")
                     continue
     
         if base_stablecoin_price <= 0: return Decimal(0), None  # Default to 1 base currency if no stablecoin price found
@@ -105,9 +125,9 @@ def get_base_price_in_stablecoin(exchange, base_symbol, quote_symbol, binance_mi
 
 def run_arbitrage_bot():
 
-    logging.info("Starting new Binance-Uniswap arbitrage cycle...")
+    logging.info("Starting new Binance-Uniswap arbitrage cycle. Press Ctrl+C to stop.")
 
-    # Load pairs from CSV
+    # Load token pairs from CSV
     if not os.path.exists(CSV_INPUT):
         logging.critical(f"Critical Error: {CSV_INPUT} not found. Skipping this cycle.")
         return
@@ -159,6 +179,9 @@ def run_arbitrage_bot():
 
         logging.info(f"({index+1}/{len(pairs_df)}) Processing pair: {binance_pair}, Uniswap pool: {uniswap_pool_id}")
 
+        blocknumber = web3_instance.eth.block_number
+        timestamp = exchange.fetch_time() // 1000  # Convert milliseconds to seconds
+
         # Initialize UniswapPoolHelper
         try:
             uniswap_pool = UniswapPoolHelper(web3_instance, uniswap_pool_id, abis)
@@ -166,44 +189,20 @@ def run_arbitrage_bot():
             logging.error(f"Failed to initialize Uniswap pool: {e}. Skipping this pair.")
             continue
 
-        blocknumber = web3_instance.eth.block_number
-        timestamp = exchange.fetch_time() // 1000  # Convert milliseconds to seconds
-
         # Determine Uniswap pool's base token
         if not reverse_price_on_uniswap:
-            uniswap_base_token_address = uniswap_pool.token0_address_cs
+            uniswap_base_token = uniswap_pool.token0_address_cs
         else:
-            uniswap_base_token_address = uniswap_pool.token1_address_cs
-
-        # Fetch Binance Ticker
-        # Ask price on Binance - this is the price at which we can buy the base currency
-        # Bid price on Binance - this is the price at which we can sell the base currency
-        try:
-            binance_ticker = exchange.fetch_ticker(binance_pair)
-            binance_ask_price = Decimal(str(binance_ticker['ask']))
-            binance_bid_price = Decimal(str(binance_ticker['bid']))
-            if binance_ask_price is None or binance_bid_price is None:
-                logging.error("Binance ticker returned None values. Skipping this pair.")
-                continue
-        except Exception as e:
-            logging.error(f"Failed to fetch Binance ticker: {e}. Skipping this pair.")
-            continue
-
-        # Fetch Uniswap pool's current price
-        try:
-            uniswap_current_price = uniswap_pool.get_current_price(reverse_price_on_uniswap)
-        except Exception as e:
-            logging.error(f"Failed to fetch Uniswap pool price: {e}. Skipping this pair.")
-            continue
+            uniswap_base_token = uniswap_pool.token1_address_cs
 
         # Get mid-prices
-        binance_mid_price = (binance_ask_price + binance_bid_price) / Decimal(2)
-        uniswap_mid_price = uniswap_current_price
+        binance_mid_price = get_binance_mid_price(exchange, binance_pair)
+        uniswap_mid_price = get_uniswap_mid_price(uniswap_pool, reverse_price_on_uniswap)
 
         # Calculate trade amount in base currency
-        # We use TRADE_VALUE_USD to determine how much base currency we can trade
+        # We use TRADE_AMOUNT_USD to determine how much base currency we can trade
         base_stablecoin_price, stablecoin_symbol = get_base_price_in_stablecoin(exchange, base_symbol, quote_symbol, binance_mid_price)
-        trade_amount_base = TRADE_VALUE_USD / base_stablecoin_price if base_stablecoin_price > 0 else Decimal(1)
+        trade_amount_base = TRADE_AMOUNT_USD / base_stablecoin_price if base_stablecoin_price > 0 else Decimal(1)
 
         result = {
             "blocknumber": blocknumber,
@@ -223,122 +222,75 @@ def run_arbitrage_bot():
             "stablecoin_symbol": stablecoin_symbol
         }
 
-        ##############################################################################
-        # --- Direction 1: Buy on Binance, Sell on Uniswap ---
-
-        # We are buying base currency on Binance so we use the ask price
-        binance_actual_price = binance_ask_price
-
-        # Calculate the amount of quote currency we need to spend to buy the base currency + binance fee
-        amount_in_quote = trade_amount_base * binance_actual_price * Decimal(str(1+config.BINANCE_FEE))
-
-        # We are selling base currency on Uniswap so we use UniswapPoolHelper.get_sell_quote
+        # We fetch Binance ticker once more and request Uniswap quotas
+        # We do it concurrently so we get the prices as close in time as possible
         try:
-            amount_out_quote, uniswap_new_price, uniswap_actual_price, gas_fee_eth = uniswap_pool.get_sell_quote(
-                token_in_address_str=uniswap_base_token_address,
-                amount_in=trade_amount_base
-            )
+            with ThreadPoolExecutor() as executor:
+                fut_ticker = executor.submit(exchange.fetch_ticker, binance_pair)
+                fut_sell = executor.submit(uniswap_pool.get_sell_quote, uniswap_base_token, trade_amount_base)
+                fut_buy = executor.submit(uniswap_pool.get_buy_quote, uniswap_base_token, trade_amount_base)
+
+                ticker = fut_ticker.result(timeout=5)
+                binance_ask_price, binance_bid_price = Decimal(str(ticker['ask'])), Decimal(str(ticker['bid']))
+                uniswap_sell_quote = fut_sell.result(timeout=5)
+                uniswap_buy_quote = fut_buy.result(timeout=5)
         except Exception as e:
-            logging.error(f"Failed to fetch Uniswap sell quote: {e}. Skipping this direction.")
+            logging.error(f"Concurrent price fetch error: {e}. Skipping this pair.")
             continue
 
-        # Convert gas fee from ETH to quote currency
-        gas_fee_quote = gas_fee_eth *  get_eth_price_in_currency(exchange, quote_symbol)
+        for direction, direction_txt, binance_actual_price, uniswap_quote in [
+            (1, "Buy on Binance, Sell on Uniswap", binance_ask_price, uniswap_sell_quote),
+            (2, "Buy on Uniswap, Sell on Binance", binance_bid_price, uniswap_buy_quote)
+        ]:
+            uniswap_amount, uniswap_new_price, uniswap_actual_price, gas_fee_eth = uniswap_quote
+            if direction == 1: # spend on Binance, receive on Uniswap
+                spend = trade_amount_base * binance_actual_price * Decimal(str(1+config.BINANCE_FEE))
+                received = uniswap_amount
+            else: # spend on Uniswap, receive on Binance
+                spend = uniswap_amount
+                received = trade_amount_base * binance_actual_price * Decimal(str(1-config.BINANCE_FEE))          
 
-        # Calculate profit
-        profit = amount_out_quote - amount_in_quote - gas_fee_quote
-        margin = profit / amount_in_quote if amount_in_quote > 0 else Decimal(0)
+            # Convert gas fee from ETH to quote currency
+            gas_fee = gas_fee_eth * get_eth_price_in_currency(exchange, quote_symbol)
 
-        # Calculate profit in stablecoin
-        profit_stablecoin = profit / binance_mid_price * base_stablecoin_price
+            # Calculate profit
+            profit = received - spend - gas_fee
+            margin = profit / spend if spend > 0 else Decimal(0)
 
-        # save results for this direction
-        results.append( 
-            result | {
-                "decision": "Buy on Binance, Sell on Uniswap",
-                "binance_actual_price": float(binance_actual_price),
-                "uniswap_actual_price": float(uniswap_actual_price),
-                "amount_in_quote": float(amount_in_quote),
-                "amount_out_quote": float(amount_out_quote),
-                "uniswap_new_price": float(uniswap_new_price),
-                "gas_fee_eth": float(gas_fee_eth),
-                "gas_fee_quote": float(gas_fee_quote),
-                "profit": float(profit),
-                "margin": float(margin),
-                "profit_stablecoin": float(profit_stablecoin)
-            }
-        )
+            # Calculate profit in stablecoin
+            profit_stablecoin = profit / binance_actual_price * base_stablecoin_price
 
-        if profit > 0 and margin > config.PROFIT_THRESHOLD:
-            logging.info("Arbitrage opportunity found!")
-            send_telegram_message(
-                f"Arbitrage Opportunity Found!\n"
-                f"Pair: {binance_pair}\n"
-                f"Uniswap Pool: {uniswap_pool_id}\n"
-                f"Direction 1: Buy on Binance, Sell on Uniswap\n"
-                f"Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}"
+            # Save results for this direction
+            results.append(
+                result | {
+                    "decision": direction_txt,
+                    "binance_actual_price": float(binance_actual_price),
+                    "uniswap_actual_price": float(uniswap_actual_price),
+                    "amount_in_quote": float(spend),
+                    "amount_out_quote": float(received),
+                    "uniswap_new_price": float(uniswap_new_price),
+                    "gas_fee_eth": float(gas_fee_eth),
+                    "gas_fee_quote": float(gas_fee),
+                    "profit": float(profit),
+                    "margin": float(margin),
+                    "profit_stablecoin": float(profit_stablecoin)
+                }
             )
 
-        logging.info(f"\tDirection 1, Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}")
+            # Log and notify if profit is above threshold
+            if profit > 0 and margin > config.PROFIT_THRESHOLD:
+                logging.info("Arbitrage opportunity found!")
+                send_telegram_message(
+                    f"Arbitrage Opportunity Found!\n"
+                    f"timestamp: {datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"Block Number: {blocknumber}\n"
+                    f"Pair: {binance_pair}\n"
+                    f"Uniswap Pool: {uniswap_pool_id}\n"
+                    f"Direction: {direction_txt}\n"
+                    f"Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}"
+                )
 
-        ############################################################################
-        # --- Direction 2: Buy on Uniswap, Sell on Binance ---
-
-        # We are selling base currency on Binance so we use the bid price
-        binance_actual_price = binance_bid_price
-
-        # Calculate the amount of quote currency we receive from selling the base currency on Binance - binance fee
-        amount_out_quote = trade_amount_base * binance_actual_price * Decimal(str(1-config.BINANCE_FEE))
-
-        # We are buying base currency on Uniswap so we use UniswapPoolHelper.get_buy_quote
-        try:
-            amount_in_quote, uniswap_new_price, uniswap_actual_price, gas_fee_eth = uniswap_pool.get_buy_quote(
-                token_out_address_str=uniswap_base_token_address,
-                amount_out=trade_amount_base
-            )
-        except Exception as e:
-            logging.error(f"Failed to fetch Uniswap sell quote: {e}. Skipping this direction.")
-            continue
-
-        # Convert gas fee from ETH to quote currency
-        gas_fee_quote = gas_fee_eth * get_eth_price_in_currency(exchange, quote_symbol)
-
-        # Calculate profit
-        profit = amount_out_quote - amount_in_quote - gas_fee_quote
-        margin = profit / amount_in_quote if amount_in_quote > 0 else Decimal(0)
-
-        # Calculate profit in stablecoin
-        profit_stablecoin = profit / binance_mid_price * base_stablecoin_price
-
-        # save results for this direction
-        results.append(
-            result | { 
-                "decision": "Buy on Uniswap, Sell on Binance",
-                "binance_actual_price": float(binance_actual_price),
-                "uniswap_actual_price": float(uniswap_actual_price),
-                "amount_in_quote": float(amount_in_quote),
-                "amount_out_quote": float(amount_out_quote),
-                "uniswap_new_price": float(uniswap_new_price),
-                "gas_fee_eth": float(gas_fee_eth),
-                "gas_fee_quote": float(gas_fee_quote),
-                "profit": float(profit),
-                "margin": float(margin),
-                "profit_stablecoin": float(profit_stablecoin)
-            }
-        )
-
-        if profit > 0 and margin > config.PROFIT_THRESHOLD:
-            logging.info("Arbitrage opportunity found!")
-            send_telegram_message(
-                f"Arbitrage Opportunity Found!\n"
-                f"Pair: {binance_pair}\n"
-                f"Uniswap Pool: {uniswap_pool_id}\n"
-                f"Direction 2: Buy on Uniswap, Sell on Binance\n"
-                f"Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}"
-            )
-
-        logging.info(f"\tDirection 2, Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}")
-
+            logging.info(f"\tDirection {direction}, Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}")
 
     # Save results to CSV
     results_df = pd.DataFrame(results)
