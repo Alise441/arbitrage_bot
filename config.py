@@ -16,7 +16,9 @@ config = SimpleNamespace(
     BINANCE_FEE=float(os.getenv("BINANCE_FEE", "0.00017250")),            # 0.01725%
     ETHEREUM_RPC_URL=os.getenv("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com"),
     UNISWAP_SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
-    QUOTER_ADDRESS="0x61fFE014bA17989E743c5F6cB21bF9697530B21e"
+    QUOTER_ADDRESS="0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+    TELEGRAM_TOKEN=os.getenv("TELEGRAM_TOKEN", ""),
+    TELEGRAM_CHAT_ID=os.getenv("TELEGRAM_CHAT_ID", "")
 )
 
 # ======== Validate THEGRAPH_API_KEY ========

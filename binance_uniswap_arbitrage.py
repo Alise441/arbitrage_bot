@@ -1,5 +1,8 @@
 import logging
-import sys 
+import sys
+import os 
+import requests
+import time
 import ccxt
 import pandas as pd
 from web3 import Web3
@@ -16,6 +19,24 @@ logging.basicConfig(
         logging.StreamHandler() # Output to console
     ]
 )
+
+# ---- Telegram Notification ----
+def send_telegram_message(message: str):
+    if not config.TELEGRAM_TOKEN or not config.TELEGRAM_CHAT_ID:
+        logging.debug("Telegram token or chat ID not set. Skipping Telegram notification.")
+        return
+
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": config.TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+
+    try:
+        requests.post(url, data=payload, timeout=5)
+    except Exception as e:
+        logging.warning(f"Failed to send Telegram message: {e}")
  
 # ---- Constants ----
 CSV_INPUT = "arbitrage_pairs.csv"
@@ -82,15 +103,18 @@ def get_base_price_in_stablecoin(exchange, base_symbol, quote_symbol, binance_mi
         return base_stablecoin_price, stablecoin_symbol
 
 
-if __name__ == "__main__":
+def run_arbitrage_bot():
 
-    logging.info("Starting Binance-Uniswap arbitrage bot...")
+    logging.info("Starting new Binance-Uniswap arbitrage cycle...")
 
     # Load pairs from CSV
+    if not os.path.exists(CSV_INPUT):
+        logging.critical(f"Critical Error: {CSV_INPUT} not found. Skipping this cycle.")
+        return
     pairs_df = pd.read_csv(CSV_INPUT)
     if pairs_df.empty:
-        logging.critical(f"Critical Error: {CSV_INPUT} is empty or not found. Stopping execution.")
-        sys.exit(1)
+        logging.critical(f"Critical Error: {CSV_INPUT} is empty or not found. Skipping this cycle.")
+        return
 
     # Initialize Binance exchange instance
     try:
@@ -98,8 +122,8 @@ if __name__ == "__main__":
         exchange.load_markets()
         logging.info("Connected to Binance.")
     except Exception as e:
-        logging.critical(f"Failed to connect to Binance: {e}")
-        sys.exit(1)
+        logging.critical(f"Failed to connect to Binance: {e}. Skipping this cycle.")
+        return
 
     # Initialize Web3 instance
     try:
@@ -108,15 +132,15 @@ if __name__ == "__main__":
             raise ConnectionError("Not connected")
         logging.info("Connected to Ethereum RPC.")
     except Exception as e:
-        logging.critical(f"Failed to connect to Ethereum RPC: {e}")
-        sys.exit(1)
+        logging.critical(f"Failed to connect to Ethereum RPC: {e}. Skipping this cycle.")
+        return
 
     # Load Uniswap ABIs
     try:
         abis = load_abis()
     except Exception as e:
-        logging.critical(f"Failed to load ABIs: {e}")
-        sys.exit(1)
+        logging.critical(f"Failed to load ABIs: {e}. Skipping this cycle.")
+        return
 
     results = []
 
@@ -245,6 +269,16 @@ if __name__ == "__main__":
             }
         )
 
+        if profit > 0 and margin > config.PROFIT_THRESHOLD:
+            logging.info("Arbitrage opportunity found!")
+            send_telegram_message(
+                f"Arbitrage Opportunity Found!\n"
+                f"Pair: {binance_pair}\n"
+                f"Uniswap Pool: {uniswap_pool_id}\n"
+                f"Direction 1: Buy on Binance, Sell on Uniswap\n"
+                f"Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}"
+            )
+
         logging.info(f"\tDirection 1, Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}")
 
         ############################################################################
@@ -293,9 +327,42 @@ if __name__ == "__main__":
             }
         )
 
+        if profit > 0 and margin > config.PROFIT_THRESHOLD:
+            logging.info("Arbitrage opportunity found!")
+            send_telegram_message(
+                f"Arbitrage Opportunity Found!\n"
+                f"Pair: {binance_pair}\n"
+                f"Uniswap Pool: {uniswap_pool_id}\n"
+                f"Direction 2: Buy on Uniswap, Sell on Binance\n"
+                f"Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}"
+            )
+
         logging.info(f"\tDirection 2, Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}")
+
 
     # Save results to CSV
     results_df = pd.DataFrame(results)
-    results_df.to_csv(CSV_OUTPUT, index=False, float_format='%.10f')
+    write_header = not os.path.exists(CSV_OUTPUT) # Write header only if file does not exist
+    results_df.to_csv(
+        CSV_OUTPUT,
+        index=False,
+        float_format='%.10f',
+        mode='a',
+        header=write_header
+    )
     logging.info(f"Results saved to {CSV_OUTPUT}")
+
+if __name__ == "__main__":
+    while True:
+        try:
+            run_arbitrage_bot()
+        except KeyboardInterrupt:
+            logging.info("Interrupted by user. Exiting...")
+            break
+        except Exception as e:
+            logging.error(f"An error occurred: {e}")
+            send_telegram_message(f"Arbitrage bot encountered an error: {e}")
+        
+        # Wait for a while before the next cycle
+        logging.info("Waiting for 10 seconds before the next cycle...")
+        time.sleep(10)
