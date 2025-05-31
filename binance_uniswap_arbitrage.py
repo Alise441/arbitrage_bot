@@ -1,15 +1,15 @@
 import logging
 import os 
-import requests
 import time
 import ccxt
 import pandas as pd
 from web3 import Web3
 from decimal import Decimal, getcontext
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from config import config, load_abis
 from uniswap_pool_helper import UniswapPoolHelper
+from telegram_utils import send_telegram_message, send_error_notification
 
 # ---- Setup logging ----
 logging.basicConfig(
@@ -21,34 +21,42 @@ logging.basicConfig(
     ]
 )
 
-# ---- Telegram Notification ----
-def send_telegram_message(message: str):
-    if not config.TELEGRAM_TOKEN or not config.TELEGRAM_CHAT_ID:
-        logging.warning("Telegram token or chat ID not set. Skipping Telegram notification.")
-        return
-
-    url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": config.TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-
-    try:
-        requests.post(url, data=payload, timeout=5)
-    except Exception as e:
-        logging.warning(f"Failed to send Telegram message: {e}")
- 
 # ---- Constants ----
+TRADE_AMOUNT_USD = None # Ask user to input this value before running the script
+CSV_OUTPUT = None # Output file will be created in the same directory as the script
 CSV_INPUT = "arbitrage_pairs.csv"
-CSV_OUTPUT = "arbitrage_results.csv"
-
-TRADE_AMOUNT_USD = Decimal(1000)
 STABLECOINS_USD = ['USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'USDP', 'FDUSD', 'USDD']
 
 getcontext().prec = 30 # Set decimal precision for calculations
 
+# ---- Aggregation State ----
+summary_stats = {
+    "start_time": datetime.now(timezone.utc),
+    "total_opportunities": 0,
+    "total_profit": Decimal(0)
+}
+
 # ---- Helper Functions ----
+def send_summary():
+    global summary_stats
+    elapsed = datetime.now(timezone.utc) - summary_stats["start_time"]
+    if elapsed >= timedelta(minutes=30):
+        try:
+            send_telegram_message(
+                f"Summary for Arbitrage Bot with trade amount {TRADE_AMOUNT_USD} USD:\n"
+                f"Elapsed time: {elapsed.total_seconds() // 60} minutes\n"
+                f"Opportunities found: {summary_stats['total_opportunities']}\n"
+                f"Total profit: {summary_stats['total_profit']:.6f} USD"
+            )
+        except Exception as e:
+            logging.warning(f"Failed to send summary to Telegram: {e}")
+        summary_stats = {
+            "start_time": datetime.now(timezone.utc),
+            "total_opportunities": 0,
+            "total_profit": Decimal(0)
+        }
+
+
 def get_binance_mid_price(exchange, pair):
     try:
         ticker = exchange.fetch_ticker(pair)
@@ -123,17 +131,17 @@ def get_base_price_in_stablecoin(exchange, base_symbol, quote_symbol, binance_mi
         return base_stablecoin_price, stablecoin_symbol
 
 
-def run_arbitrage_bot():
+def run_arbitrage_cycle():
 
     logging.info("Starting new Binance-Uniswap arbitrage cycle. Press Ctrl+C to stop.")
 
     # Load token pairs from CSV
     if not os.path.exists(CSV_INPUT):
-        logging.critical(f"Critical Error: {CSV_INPUT} not found. Skipping this cycle.")
+        logging.critical(f"{CSV_INPUT} not found. Skipping this cycle.")
         return
     pairs_df = pd.read_csv(CSV_INPUT)
     if pairs_df.empty:
-        logging.critical(f"Critical Error: {CSV_INPUT} is empty or not found. Skipping this cycle.")
+        logging.critical(f"{CSV_INPUT} is empty or not found. Skipping this cycle.")
         return
 
     # Initialize Binance exchange instance
@@ -174,10 +182,10 @@ def run_arbitrage_bot():
         #                True  -> Binance price: QUOTE/BASE, Uniswap reversed price: token0/token1 (token0=QUOTE, token1=BASE)
         reverse_price_on_uniswap = bool(row["reverse_price"]) 
 
+        logging.info(f"({index+1}/{len(pairs_df)}) Processing pair: {binance_pair}, Uniswap pool: {uniswap_pool_id}")
+
         base_symbol = binance_pair.split('/')[0].upper()
         quote_symbol = binance_pair.split('/')[1].upper()
-
-        logging.info(f"({index+1}/{len(pairs_df)}) Processing pair: {binance_pair}, Uniswap pool: {uniswap_pool_id}")
 
         blocknumber = web3_instance.eth.block_number
         timestamp = exchange.fetch_time() // 1000  # Convert milliseconds to seconds
@@ -235,9 +243,13 @@ def run_arbitrage_bot():
                 uniswap_sell_quote = fut_sell.result(timeout=5)
                 uniswap_buy_quote = fut_buy.result(timeout=5)
         except Exception as e:
-            logging.error(f"Concurrent price fetch error: {e}. Skipping this pair.")
+            if isinstance(e, TimeoutError):
+                logging.error("Concurrent price fetch timed out. Skipping this pair.")
+            else:
+                logging.error(f"Concurrent price fetch error: {e}. Skipping this pair.")
             continue
 
+        # We calculate profit for both directions: 1) Buy on Binance, Sell on Uniswap and 2) Buy on Uniswap, Sell on Binance
         for direction, direction_txt, binance_actual_price, uniswap_quote in [
             (1, "Buy on Binance, Sell on Uniswap", binance_ask_price, uniswap_sell_quote),
             (2, "Buy on Uniswap, Sell on Binance", binance_bid_price, uniswap_buy_quote)
@@ -277,20 +289,14 @@ def run_arbitrage_bot():
                 }
             )
 
-            # Log and notify if profit is above threshold
+            # If profit is positive and margin is above the threshold, log the opportunity
             if profit > 0 and margin > config.PROFIT_THRESHOLD:
                 logging.info("Arbitrage opportunity found!")
-                send_telegram_message(
-                    f"Arbitrage Opportunity Found!\n"
-                    f"timestamp: {datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    f"Block Number: {blocknumber}\n"
-                    f"Pair: {binance_pair}\n"
-                    f"Uniswap Pool: {uniswap_pool_id}\n"
-                    f"Direction: {direction_txt}\n"
-                    f"Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}"
-                )
+                summary_stats["total_opportunities"] += 1
+                summary_stats["total_profit"] += profit_stablecoin
 
-            logging.info(f"\tDirection {direction}, Margin: {margin:.6f}, Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}")
+            logging.info(f"\tDirection: {direction_txt}, Margin: {margin:.6f}, "
+                         f"Profit: {profit:.6f} {quote_symbol}, Profit in {stablecoin_symbol}: {profit_stablecoin:.6f}")
 
     # Save results to CSV
     results_df = pd.DataFrame(results)
@@ -305,15 +311,34 @@ def run_arbitrage_bot():
     logging.info(f"Results saved to {CSV_OUTPUT}")
 
 if __name__ == "__main__":
+    # Ask user to input the trade amount in USD
+    while TRADE_AMOUNT_USD is None:
+        try:
+            user_input = input("Enter the trade amount in USD (e.g., 1000): ")
+            TRADE_AMOUNT_USD = Decimal(user_input)
+            if TRADE_AMOUNT_USD <= 0:
+                raise ValueError("Trade amount must be greater than 0.")
+        except ValueError as e:
+            logging.error(f"Invalid input: {e}. Please enter a valid number.")
+            TRADE_AMOUNT_USD = None
+    logging.info(f"Trade amount set to {TRADE_AMOUNT_USD} USD.")
+    send_telegram_message(f"Arbitrage bot started with trade amount: {TRADE_AMOUNT_USD} USD")
+
+    # Set the output CSV file name
+    CSV_OUTPUT = f"arbitrage_results_{TRADE_AMOUNT_USD}.csv"
+
+    # Start the main loop for arbitrage cycles
     while True:
         try:
-            run_arbitrage_bot()
+            run_arbitrage_cycle()
+            send_summary()
         except KeyboardInterrupt:
             logging.info("Interrupted by user. Exiting...")
+            send_telegram_message(f"Arbitrage bot with trade amount {TRADE_AMOUNT_USD} USD has been stopped by user.")
             break
         except Exception as e:
             logging.error(f"An error occurred: {e}")
-            send_telegram_message(f"Arbitrage bot encountered an error: {e}")
+            send_error_notification(f"Arbitrage bot with trade amount {TRADE_AMOUNT_USD} USD encountered an error: {e}")
         
         # Wait for a while before the next cycle
         logging.info("Waiting for 10 seconds before the next cycle...")
