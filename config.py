@@ -5,10 +5,10 @@ import logging
 from dotenv import load_dotenv
 from types import SimpleNamespace
 
+logger = logging.getLogger(__name__)
+
 # Load environment variables from .env file
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 # ======== Configuration Constants ========
 config = SimpleNamespace(
@@ -16,11 +16,16 @@ config = SimpleNamespace(
     BINANCE_FEE=float(os.getenv("BINANCE_FEE", "0.00017250")),            # 0.01725%
     ETHEREUM_RPC_URL=os.getenv("ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com"),
     UNISWAP_SUBGRAPH_ID="5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
-    QUOTER_ADDRESS="0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+    QUOTER_ADDRESS="0x61fFE014bA17989E743c5F6cB21bF9697530B21e", # UniswapV3QuoterV2 Mainnet Address
+    QUOTER_ADDRESS_SEPOLIA="0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3",  # UniswapV3QuoterV2 Sepolia Address
+    ROUTER_ADDRESS_SEPOLIA="0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E", # SwapRouter02 Sepolia Address
     TELEGRAM_TOKEN=os.getenv("TELEGRAM_TOKEN", ""),
     TELEGRAM_CHAT_ID=os.getenv("TELEGRAM_CHAT_ID", ""),
     TELEGRAM_ERROR_TOKEN=os.getenv("TELEGRAM_ERROR_TOKEN", ""),
-    TELEGRAM_ERROR_CHAT_ID=os.getenv("TELEGRAM_ERROR_CHAT_ID", "")
+    TELEGRAM_ERROR_CHAT_ID=os.getenv("TELEGRAM_ERROR_CHAT_ID", ""),
+
+    WALLET_ADDRESS=os.getenv("WALLET_ADDRESS"),
+    WALLET_PRIVATE_KEY=os.getenv("WALLET_PRIVATE_KEY")
 )
 
 # ======== Validate THEGRAPH_API_KEY ========
@@ -43,6 +48,7 @@ ABI_PATHS = {
     "QUOTER": ABI_DIR / "UniswapV3QuoterV2.json",
     "POOL": ABI_DIR / "UniswapV3Pool.json",
     "ERC20": ABI_DIR / "Erc20.json",
+    "ROUTER": ABI_DIR / "UniswapV3RouterV2.json",
 }
 
 # ======== Load ABI Function ========
