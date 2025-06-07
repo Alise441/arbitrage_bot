@@ -8,6 +8,7 @@ appnope==0.1.4
 asttokens==3.0.0
 attrs==25.3.0
 backoff==2.2.1
+binance-connector==3.12.0
 bitarray==3.4.2
 ccxt==4.4.86
 certifi==2025.4.26
@@ -83,5 +84,6 @@ tzdata==2025.2
 urllib3==2.4.0
 wcwidth==0.2.13
 web3==7.12.0
+websocket-client==1.8.0
 websockets==15.0.1
 yarl==1.20.0
