@@ -1,6 +1,6 @@
-# UniBin Arbitrage
+# Uniswap Binance Arbitrage
 
-**UniBin Arbitrage** is a Python-based arbitrage bot designed to monitor and identify price discrepancies between Binance (a centralized exchange) and Uniswap V3 (a decentralized exchange). When a profitable opportunity is found, it logs the data, sends a notification via Telegram, and can execute a test trade on the Sepolia testnet.
+**Uniswap Binance Arbitrage** is a Python-based arbitrage bot designed to monitor and identify price discrepancies between Binance (a centralized exchange) and Uniswap V3 (a decentralized exchange). When a profitable opportunity is found, it logs the data, sends a notification via Telegram, and can execute a test trade on the Sepolia testnet.
 
 ## Features
 
@@ -27,8 +27,8 @@ Follow these instructions to set up and run the project locally.
 
 Clone this repository to your local machine:
 ```bash
-git clone https://gitlab.uzh.ch/alina.ponomareva/unibin-arbitrage.git
-cd unibin-arbitrage
+git clone https://github.com/Alise441/arbitrage_bot
+cd arbitrage_bot
 ```
 
 ### 3. Set Up a Virtual Environment
