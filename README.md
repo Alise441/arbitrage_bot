@@ -89,9 +89,9 @@ TELEGRAM_CHAT_ID=""
 
 # -- Trading Parameters (Optional) --
 # Minimum profit margin to trigger a trade (e.g., 0.001 for 0.1%). By default 0.0001
-PROFIT_THRESHOLD="0.0001"
+PROFIT_THRESHOLD=0.0001
 # Your trading fee on Binance (e.g., 0.001 for 0.1%). By default 0.00017250
-BINANCE_FEE="0.00017250"
+BINANCE_FEE=0.00017250
 ```
 
 ## Usage Instructions
