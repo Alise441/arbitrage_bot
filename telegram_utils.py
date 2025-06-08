@@ -15,14 +15,3 @@ def send_telegram_message(message: str):
         requests.post(url, data=payload, timeout=5)
     except Exception as e:
         logger.warning(f"Failed to send Telegram message: {e}")
-
-def send_error_notification(message: str):
-    if not config.TELEGRAM_ERROR_TOKEN or not config.TELEGRAM_ERROR_CHAT_ID:
-        logger.warning("Error Telegram token or chat ID not set. Skipping error notification.")
-        return
-    url = f"https://api.telegram.org/bot{config.TELEGRAM_ERROR_TOKEN}/sendMessage"
-    payload = {"chat_id": config.TELEGRAM_ERROR_CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    try:
-        requests.post(url, data=payload, timeout=5)
-    except Exception as e:
-        logger.warning(f"Failed to send Telegram error notification: {e}")

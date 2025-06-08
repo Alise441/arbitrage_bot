@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from config import config, load_abis
 from uniswap_pool_helper import UniswapPoolHelper, Token
-from telegram_utils import send_telegram_message, send_error_notification
+from telegram_utils import send_telegram_message
 from arbitrage_executor import execute_arbitrage_trade
 
 # ---- Setup logging ----
@@ -278,8 +278,8 @@ def main():
             break
         except Exception as e:
             logging.critical(f"A critical error occurred in the main loop: {e}", exc_info=True)
-            send_error_notification(f"Bot encountered a critical error: {e}")
-        
+            send_telegram_message(f"Bot encountered a critical error: {e}")
+
         logging.info("Cycle finished. Waiting 10 seconds...")
         time.sleep(10)
 

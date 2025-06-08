@@ -2,7 +2,7 @@ import logging
 from decimal import Decimal
 from uniswap_pool_helper import UniswapPoolHelper, Token
 from config import config
-from telegram_utils import send_telegram_message, send_error_notification
+from telegram_utils import send_telegram_message
 
 # Create a logger specifically for the execution module
 logger = logging.getLogger('trade_executor')
@@ -61,7 +61,7 @@ def execute_arbitrage_trade(
                 send_telegram_message(f"SUCCESS: Uniswap sell transaction successful for {pair_key}. See: https://sepolia.etherscan.io/tx/0x{tx_hash}")
             else:
                 logger.warning(f"Uniswap sell was not confirmed or was cancelled for {pair_key}.")
-                send_error_notification(f"Uniswap sell was not confirmed or was cancelled for {pair_key}.")
+                send_telegram_message(f"Uniswap sell was not confirmed or was cancelled for {pair_key}.")
 
         elif "Buy on Uniswap" in direction:
             # In this direction, we are buying on Uniswap.
@@ -84,14 +84,14 @@ def execute_arbitrage_trade(
                 send_telegram_message(f"SUCCESS: Uniswap buy transaction successful for {pair_key}. See: https://sepolia.etherscan.io/tx/0x{tx_hash}")
             else:
                 logger.warning(f"Uniswap buy was not confirmed or was cancelled for {pair_key}.")
-                send_error_notification(f"Uniswap buy was not confirmed or was cancelled for {pair_key}.")
+                send_telegram_message(f"Uniswap buy was not confirmed or was cancelled for {pair_key}.")
 
         # Here you would add the logic for the second leg of the trade on Binance.
 
     except Exception as e:
         logger.error(f"EXECUTION THREAD for {pair_key_locked}: "
                      f"An error occurred during trade execution: {e}", exc_info=True)
-        send_error_notification(f"EXECUTION THREAD for {pair_key_locked}: "
+        send_telegram_message(f"EXECUTION THREAD for {pair_key_locked}: "
                                 f"An error occurred during trade execution: {e}")
     finally:
         # CRITICAL: Always remove the pair from the active set, even if the trade fails.
