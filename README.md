@@ -2,8 +2,6 @@
 
 **UniBin Arbitrage** is a Python-based arbitrage bot designed to monitor and identify price discrepancies between Binance (a centralized exchange) and Uniswap V3 (a decentralized exchange). When a profitable opportunity is found, it logs the data, sends a notification via Telegram, and can execute a test trade on the Sepolia testnet.
 
-![Architectural Flowchart](https://i.imgur.com/gK9qJ9Y.png)
-
 ## Features
 
 - **Cross-Exchange Monitoring:** Simultaneously fetches price data from Binance and Uniswap V3.
