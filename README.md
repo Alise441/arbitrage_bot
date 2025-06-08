@@ -27,7 +27,7 @@ Follow these instructions to set up and run the project locally.
 
 Clone this repository to your local machine:
 ```bash
-git clone [https://gitlab.uzh.ch/alina.ponomareva/unibin-arbitrage.git](https://gitlab.uzh.ch/alina.ponomareva/unibin-arbitrage.git)
+git clone https://gitlab.uzh.ch/alina.ponomareva/unibin-arbitrage.git
 cd unibin-arbitrage
 ```
 
@@ -102,7 +102,7 @@ Follow these steps to run the arbitrage bot.
 
 First, you need to generate the `arbitrage_pairs.csv` file, which contains the list of trading pairs the bot will monitor.
 
-Run the Jupyter Notebook: `notebook get_arbitrage_pairs.ipynb` (for example in Google Colab).
+Run the Jupyter Notebook: `get_arbitrage_pairs.ipynb` (for example in Google Colab).
 
 Execute all the cells in the notebook. This will create the `arbitrage_pairs.csv` file in your project directory.
 
