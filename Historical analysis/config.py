@@ -1,6 +1,6 @@
 # config.py
 
-# Replace with your actual API key (no brackets)
+# Replace with your actual API key
 API_KEY = "9dcbb5e84ceaf493ef59318aebc7ad17"
 
 SUBGRAPH_URL = (
